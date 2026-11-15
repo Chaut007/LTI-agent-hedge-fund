@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5ed8a907-dc2f-4b08-b962-1aa0e5355ff5",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "C:\\Users\\jojoj\\Project\\hedge_fund\\.archify\\workflow-daily-pipeline-20261021-182435\\candidate.json",
+  "output": "C:\\Users\\jojoj\\Project\\hedge_fund\\.archify\\workflow-daily-pipeline-20261021-182435\\daily-pipeline.html",
+  "specification": {
+    "sha256": "e55462fb30d9a9cb5cd50de52a3cad06d6db6caa9507d907d87c57aae73c120f",
+    "bytes": 6239
+  },
+  "artifact": {
+    "sha256": "108e05b7ea580fa8d5ea7c5706c2852696c1d2b08b5cb4c9780838218065f517",
+    "bytes": 834308
+  }
+}

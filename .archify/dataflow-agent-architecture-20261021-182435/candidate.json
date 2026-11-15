@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Agent Architecture and Signal Flow",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": ".archify/dataflow-agent-architecture-20261021-182435/agent-architecture.html"
+  },
+  "stages": [
+    { "label": "Free Data Sources" },
+    { "label": "Point-in-Time Lake" },
+    { "label": "Agents to Signal" },
+    { "label": "Aggregate, Risk, Size" },
+    { "label": "Execution and Feedback" }
+  ],
+  "nodes": [
+    { "id": "yf", "type": "external", "label": "yfinance", "sublabel": "EOD OHLCV", "stage": 0, "row": 0, "tag": "free" },
+    { "id": "edgar", "type": "external", "label": "SEC EDGAR", "sublabel": "companyfacts XBRL", "stage": 0, "row": 1, "tag": "filing dates" },
+    { "id": "fred", "type": "external", "label": "FRED", "sublabel": "rates, CPI, curve", "stage": 0, "row": 2, "tag": "free" },
+    { "id": "news", "type": "external", "label": "Alpaca News", "sublabel": "headlines", "stage": 0, "row": 3, "tag": "free tier" },
+
+    { "id": "lake", "type": "database", "label": "DuckDB Lake", "sublabel": "asof-keyed parquet", "stage": 1, "row": 2, "tag": "no lookahead" },
+
+    { "id": "momentum", "type": "backend", "label": "MomentumAgent", "sublabel": "12 minus 1 month", "stage": 2, "row": 0, "tag": "zero cost" },
+    { "id": "value", "type": "backend", "label": "ValueAgent", "sublabel": "earnings yield, B/P", "stage": 2, "row": 1, "tag": "zero cost" },
+    { "id": "quality", "type": "backend", "label": "QualityAgent", "sublabel": "ROE, D/E, margins", "stage": 2, "row": 2, "tag": "zero cost" },
+    { "id": "volrev", "type": "backend", "label": "LowVol + Reversal", "sublabel": "60-day vol, 5-day reversal", "stage": 2, "row": 3, "tag": "zero cost" },
+    { "id": "llmagents", "type": "cloud", "label": "LLM Agents", "sublabel": "news, narrative, macro", "stage": 2, "row": 4, "tag": "Phase 1, paid" },
+
+    { "id": "aggregate", "type": "backend", "label": "Signal Aggregator", "sublabel": "cross-sectional rank", "stage": 3, "row": 1, "tag": "record-weighted" },
+    { "id": "risk", "type": "security", "label": "Risk Manager", "sublabel": "hard limits enforced", "stage": 3, "row": 2, "tag": "veto, not a vote" },
+    { "id": "optimizer", "type": "backend", "label": "Optimizer", "sublabel": "target weights", "stage": 3, "row": 3, "tag": "no LLM here" },
+
+    { "id": "backtest", "type": "backend", "label": "Backtester", "sublabel": "vectorized, cost model", "stage": 4, "row": 0, "tag": "same agent code" },
+    { "id": "broker", "type": "cloud", "label": "Alpaca", "sublabel": "10:00 ET orders", "stage": 4, "row": 3, "tag": "paper by default" },
+    { "id": "track", "type": "database", "label": "Track Record Store", "sublabel": "decisions and outcomes", "stage": 4, "row": 4, "tag": "scores each agent" }
+  ],
+  "flows": [
+    { "id": "yf-lake", "from": "yf", "to": "lake", "label": "prices", "variant": "emphasis" },
+    { "id": "edgar-lake", "from": "edgar", "to": "lake", "label": "filings", "classification": "point-in-time", "variant": "emphasis" },
+    { "id": "fred-lake", "from": "fred", "to": "lake", "label": "macro", "variant": "default" },
+    { "id": "news-lake", "from": "news", "to": "lake", "label": "news", "variant": "default" },
+
+    { "id": "lake-momentum", "from": "lake", "to": "momentum", "label": "prices", "variant": "emphasis" },
+    { "id": "lake-value", "from": "lake", "to": "value", "label": "fundamentals", "variant": "emphasis" },
+    { "id": "lake-quality", "from": "lake", "to": "quality", "label": "fundamentals", "variant": "default" },
+    { "id": "lake-volrev", "from": "lake", "to": "volrev", "label": "prices", "variant": "default" },
+    { "id": "lake-llm", "from": "lake", "to": "llmagents", "label": "news + macro", "variant": "dashed" },
+
+    { "id": "momentum-agg", "from": "momentum", "to": "aggregate", "label": "Signal", "variant": "emphasis" },
+    { "id": "value-agg", "from": "value", "to": "aggregate", "label": "Signal", "variant": "emphasis" },
+    { "id": "quality-agg", "from": "quality", "to": "aggregate", "label": "Signal", "variant": "default" },
+    { "id": "volrev-agg", "from": "volrev", "to": "aggregate", "label": "Signal", "variant": "default" },
+    { "id": "llm-agg", "from": "llmagents", "to": "aggregate", "label": "Signal + cost", "variant": "dashed" },
+
+    { "id": "agg-risk", "from": "aggregate", "to": "risk", "label": "candidate weights", "variant": "emphasis", "route": "straight" },
+    { "id": "risk-opt", "from": "risk", "to": "optimizer", "label": "approved set", "variant": "emphasis", "route": "straight" },
+
+    { "id": "opt-broker", "from": "optimizer", "to": "broker", "label": "target weights", "variant": "emphasis" },
+    { "id": "agg-backtest", "from": "aggregate", "to": "backtest", "label": "replay offline", "variant": "dashed" },
+    { "id": "broker-track", "from": "broker", "to": "track", "label": "fills + returns", "variant": "default", "route": "straight" },
+    { "id": "track-agg", "from": "track", "to": "aggregate", "label": "agent weights", "classification": "feedback loop", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One interface, two phases",
+      "items": [
+        "Every agent returns the same Signal: score -1 to 1, confidence, horizon_days, rationale, cost_usd",
+        "Phase 0 agents are plain code at zero cost and get built first",
+        "Phase 1 LLM agents implement the same interface, so adding them rearchitects nothing"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "An LLM never sizes a position",
+      "items": [
+        "LLM agents may only emit a Signal; they never decide share counts or dollar amounts",
+        "Aggregator, Risk Manager and Optimizer are deterministic code: unit-testable and free to run",
+        "The Risk Manager holds a veto over the aggregated view, not one vote among many"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Point-in-time or nothing",
+      "items": [
+        "SEC EDGAR companyfacts carries filing dates, so the lake can answer what was knowable on a given date",
+        "Without that, an LLM backtest before the model training cutoff is contaminated and looks falsely brilliant",
+        "The Backtester replays the same agent code against the same asof-keyed lake"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "The feedback loop is the point",
+      "items": [
+        "Every decision is stored with the inputs that produced it",
+        "Agents are scored out-of-sample and the aggregator reweights them",
+        "cost_usd travels with every Signal, so a paid agent has to earn its keep"
+      ]
+    }
+  ]
+}

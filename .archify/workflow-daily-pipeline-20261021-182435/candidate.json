@@ -1,0 +1,100 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Daily Rebalance Pipeline",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-daily-pipeline-20261021-182435/daily-pipeline.html"
+  },
+  "lanes": [
+    { "id": "data", "label": "Data Layer" },
+    { "id": "llm", "label": "LLM Layer / Phase 1 only" },
+    { "id": "core", "label": "Deterministic Core / Phase 0" },
+    { "id": "risk", "label": "Risk Gate", "variant": "exception" },
+    { "id": "exec", "label": "Execution" }
+  ],
+  "phases": [
+    { "id": "evening", "label": "Evening after close", "fromCol": 0, "toCol": 3 },
+    { "id": "morning", "label": "Next morning", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "groups": [
+    { "id": "paid_layer", "label": "Added only when budget exists", "lane": "llm", "fromCol": 3, "toCol": 4, "variant": "dashed" },
+    { "id": "free_layer", "label": "Runs at zero cost", "lane": "core", "fromCol": 2, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["close", "ingest", "lake", "screen", "agents", "aggregate", "optimizer", "riskmgr", "broker"],
+  "nodes": [
+    { "id": "close", "lane": "data", "col": 0, "type": "external", "label": "Market Close", "sublabel": "16:00 ET", "icon": "clock" },
+    { "id": "ingest", "lane": "data", "col": 1, "type": "backend", "label": "Data Ingest", "sublabel": "16:30 ET", "tag": "4 free sources" },
+    { "id": "lake", "lane": "data", "col": 2, "type": "database", "label": "DuckDB Lake", "sublabel": "asof-keyed parquet", "tag": "no lookahead" },
+
+    { "id": "batch", "lane": "llm", "col": 3, "type": "cloud", "label": "Batch API Job", "sublabel": "17:15 ET, Haiku then Opus", "tag": "50% batch price" },
+    { "id": "sync", "lane": "llm", "col": 4, "type": "messagebus", "label": "Sync Fallback", "sublabel": "unfinished by 07:00 ET" },
+
+    { "id": "screen", "lane": "core", "col": 2, "type": "backend", "label": "Quant Screen", "sublabel": "17:00 ET, 500 to 100", "tag": "pure code" },
+    { "id": "agents", "lane": "core", "col": 3, "type": "backend", "label": "Phase 0 Agents", "sublabel": "5 factor signals", "tag": "zero cost" },
+    { "id": "aggregate", "lane": "core", "col": 4, "type": "backend", "label": "Signal Aggregator", "sublabel": "08:00 ET, cross-sectional rank", "tag": "record-weighted" },
+    { "id": "optimizer", "lane": "core", "col": 5, "type": "backend", "label": "Optimizer", "sublabel": "target weights", "tag": "no LLM here" },
+
+    { "id": "riskmgr", "lane": "risk", "col": 5, "type": "security", "label": "Risk Manager", "sublabel": "hard limits enforced", "tag": "veto, not a vote" },
+
+    { "id": "halt", "lane": "exec", "col": 4, "type": "security", "label": "Halt to All Cash", "sublabel": "15% drawdown", "tag": "manual restart" },
+    { "id": "broker", "lane": "exec", "col": 5, "type": "cloud", "label": "Alpaca Orders", "sublabel": "10:00 ET, open avoided", "tag": "paper by default" }
+  ],
+  "edges": [
+    { "id": "close-ingest", "from": "close", "to": "ingest", "label": "EOD trigger", "variant": "default", "role": "main" },
+    { "id": "ingest-lake", "from": "ingest", "to": "lake", "label": "bars + filings", "variant": "emphasis", "role": "main" },
+    { "id": "lake-screen", "from": "lake", "to": "screen", "label": "point-in-time read", "variant": "emphasis", "role": "main" },
+    { "id": "screen-agents", "from": "screen", "to": "agents", "label": "100 candidates", "variant": "emphasis", "role": "main" },
+    { "id": "agents-aggregate", "from": "agents", "to": "aggregate", "label": "Signals", "variant": "emphasis", "role": "main" },
+
+    { "id": "screen-batch", "from": "screen", "to": "batch", "label": "top 100 tickers", "variant": "dashed", "role": "async" },
+    { "id": "batch-sync", "from": "batch", "to": "sync", "label": "late or stalled", "variant": "dashed", "role": "branch" },
+    { "id": "batch-aggregate", "from": "batch", "to": "aggregate", "label": "LLM Signals", "variant": "dashed", "role": "async" },
+    { "id": "sync-aggregate", "from": "sync", "to": "aggregate", "label": "catch-up calls", "variant": "dashed", "role": "async" },
+
+    { "id": "aggregate-optimizer", "from": "aggregate", "to": "optimizer", "label": "ranked scores", "variant": "emphasis", "role": "main" },
+    { "id": "optimizer-riskmgr", "from": "optimizer", "to": "riskmgr", "label": "proposed weights", "variant": "security", "role": "main" },
+    { "id": "riskmgr-broker", "from": "riskmgr", "to": "broker", "label": "approved orders", "variant": "emphasis", "role": "main" },
+    { "id": "riskmgr-halt", "from": "riskmgr", "to": "halt", "label": "kill switch fires", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Phase 0 is the baseline, not the fallback",
+      "items": [
+        "The Deterministic Core runs at zero cost: yfinance, SEC EDGAR, FRED, Alpaca paper, GitHub Actions cron",
+        "The LLM layer is only worth paying for if it beats this core out-of-sample",
+        "Both phases share one Agent interface, so Phase 1 plugs in without rearchitecting"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Risk Manager holds a veto, not a vote",
+      "items": [
+        "MAX_POSITION_PCT 0.10, 8 to 15 positions, LEVERAGE 1.0, ALLOW_SHORT False",
+        "MAX_DAILY_TURNOVER 0.20, MAX_ORDER_VS_ADV 0.05",
+        "KILL_SWITCH_DD 0.15 flattens to cash and requires a manual restart"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Why these clock times",
+      "items": [
+        "Ingest after the close keeps filing dates honest, which is what prevents lookahead bias",
+        "Batch API costs 50% less and a daily rebalance does not need a synchronous answer",
+        "Orders go at 10:00 ET, not the 09:30 open, where spreads are widest",
+        "Positions are always held overnight, so no trade counts against the PDT limit under $25k"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Paper is the default mode",
+      "items": [
+        "Live trading requires an explicit --live flag plus a typed confirmation",
+        "Every decision is logged with the inputs that produced it",
+        "Three months of paper trading before any real capital"
+      ]
+    }
+  ]
+}

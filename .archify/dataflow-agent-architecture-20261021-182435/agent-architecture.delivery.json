@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "8ea131f2-16b0-40cf-9060-40e4c5c93cc0",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "C:\\Users\\jojoj\\Project\\hedge_fund\\.archify\\dataflow-agent-architecture-20261021-182435\\candidate.json",
+  "output": "C:\\Users\\jojoj\\Project\\hedge_fund\\.archify\\dataflow-agent-architecture-20261021-182435\\agent-architecture.html",
+  "specification": {
+    "sha256": "5f88132115d52ab57180ac536034c66a103c52e57e197b559ec0cce0948e7ac8",
+    "bytes": 6683
+  },
+  "artifact": {
+    "sha256": "720202eed52e881617f4a53a5b6d64efd33d7c3fbd38dd5f227897d533577bc7",
+    "bytes": 836992
+  }
+}

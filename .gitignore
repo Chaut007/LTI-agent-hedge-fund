@@ -1,0 +1,33 @@
+# Data lake: large, regenerable from free sources. Never commit it.
+data/lake/
+data/raw/
+
+# Secrets and local contact details
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Diagrams keep their HTML, not their receipts
+.archify/**/*.finalize.json
+.archify/**/*.finalize-summary.json
+.archify/**/*.browser-check.json
+
+# Generated universe snapshots: regenerable from the Nasdaq screener, and
+# "top 500 by today's market cap" is a moving target worth re-deriving.
+data/universe/top500*.csv
