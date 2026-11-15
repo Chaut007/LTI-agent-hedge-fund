@@ -96,7 +96,14 @@ drawdown 44%, SPY's own was 33.7%). Step 5 therefore defaults the stop to 40%
 in `BOOTSTRAP_INFORMED` and keeps the original value in `AS_DESIGNED` so the
 comparison stays reproducible.
 
-Design diagrams live in `.archify/` — open the `.html` files in a browser.
+Diagrams live in `.archify/` — open the `.html` files in a browser.
+
+- `workflow-decision-logic-*` — the current decision path and every point at
+  which it can refuse: an agent omitting a ticker, the optimizer finding
+  nothing worth holding, the risk manager vetoing, the drawdown stop firing.
+- `workflow-daily-pipeline-*` and `dataflow-agent-architecture-*` — drawn at
+  step 2 and **now out of date**: neither shows the risk layer, the optimizer,
+  or the stop. Kept because the data-layer half is still accurate.
 
 ## Setup
 

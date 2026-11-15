@@ -1,0 +1,285 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Decision Logic and Every Place It Can Refuse",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-decision-logic-20261115-190612/decision-logic.html"
+  },
+  "lanes": [
+    {
+      "id": "data",
+      "label": "Data"
+    },
+    {
+      "id": "agents",
+      "label": "Agents"
+    },
+    {
+      "id": "sizing",
+      "label": "Sizing"
+    },
+    {
+      "id": "risk",
+      "label": "Risk gate",
+      "variant": "exception"
+    },
+    {
+      "id": "exec",
+      "label": "Engine"
+    }
+  ],
+  "phases": [
+    {
+      "id": "decide",
+      "label": "Decide at close T",
+      "fromCol": 0,
+      "toCol": 4
+    },
+    {
+      "id": "execute",
+      "label": "Execute T+1",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "groups": [
+    {
+      "id": "no_llm",
+      "label": "No LLM past here",
+      "lane": "sizing",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "enforced",
+      "label": "Enforced",
+      "lane": "risk",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "view",
+    "agents",
+    "aggregate",
+    "optimize",
+    "review",
+    "stop",
+    "fill"
+  ],
+  "nodes": [
+    {
+      "id": "view",
+      "lane": "data",
+      "col": 0,
+      "type": "database",
+      "label": "AsofView(T)",
+      "sublabel": "prices + filings",
+      "tag": "to T only"
+    },
+    {
+      "id": "agents",
+      "lane": "agents",
+      "col": 1,
+      "type": "backend",
+      "label": "Five agents",
+      "sublabel": "Signal only",
+      "tag": "zero cost"
+    },
+    {
+      "id": "omit",
+      "lane": "agents",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Omits the ticker",
+      "sublabel": "cannot evaluate"
+    },
+    {
+      "id": "aggregate",
+      "lane": "sizing",
+      "col": 2,
+      "type": "backend",
+      "label": "Aggregator",
+      "sublabel": "confidence-weighted",
+      "tag": "no dilution"
+    },
+    {
+      "id": "optimize",
+      "lane": "sizing",
+      "col": 3,
+      "type": "backend",
+      "label": "Optimizer",
+      "sublabel": "top-N + band",
+      "tag": "traded less"
+    },
+    {
+      "id": "cash",
+      "lane": "sizing",
+      "col": 4,
+      "type": "messagebus",
+      "label": "All cash",
+      "sublabel": "nothing qualifies"
+    },
+    {
+      "id": "review",
+      "lane": "risk",
+      "col": 4,
+      "type": "security",
+      "label": "Risk Manager",
+      "sublabel": "clamp or veto",
+      "tag": "all logged"
+    },
+    {
+      "id": "flat",
+      "lane": "risk",
+      "col": 5,
+      "type": "security",
+      "label": "Flat book",
+      "sublabel": "vetoed or thin"
+    },
+    {
+      "id": "stop",
+      "lane": "exec",
+      "col": 4,
+      "type": "security",
+      "label": "Drawdown stop",
+      "sublabel": "from the bootstrap",
+      "tag": "not optional"
+    },
+    {
+      "id": "fill",
+      "lane": "exec",
+      "col": 5,
+      "type": "cloud",
+      "label": "Fill at the next close",
+      "sublabel": "turnover charged",
+      "tag": "paper first"
+    }
+  ],
+  "edges": [
+    {
+      "id": "read",
+      "from": "view",
+      "to": "agents",
+      "label": "read",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "signals",
+      "from": "agents",
+      "to": "aggregate",
+      "label": "Signals",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "nodata",
+      "from": "agents",
+      "to": "omit",
+      "label": "no data",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "scores",
+      "from": "aggregate",
+      "to": "optimize",
+      "label": "scores",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "nothing",
+      "from": "optimize",
+      "to": "cash",
+      "label": "none qualify",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "proposal",
+      "from": "optimize",
+      "to": "review",
+      "label": "proposed",
+      "variant": "security",
+      "role": "main"
+    },
+    {
+      "id": "veto",
+      "from": "review",
+      "to": "flat",
+      "label": "veto",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "approved",
+      "from": "review",
+      "to": "stop",
+      "label": "approved",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "halt",
+      "from": "stop",
+      "to": "flat",
+      "label": "stop fires",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "execute",
+      "from": "stop",
+      "to": "fill",
+      "label": "within stop",
+      "variant": "emphasis",
+      "role": "main"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Four places it can decline, and they mean different things",
+      "items": [
+        "An agent omits a ticker it cannot evaluate. Omission means no data; a score of 0.0 means evaluated, no edge \u2014 the aggregator treats them differently",
+        "The optimizer returns nothing when no name beats min_score, so an all-cash book is reachable",
+        "The risk manager holds cash rather than padding a thin book with names the strategy never chose",
+        "The drawdown stop flattens regardless of what the strategy asked for"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Clamp versus veto is the distinction worth defending",
+      "items": [
+        "A position over its cap is a size mistake: cut it to the cap and record it",
+        "A short in a long-only book is not a size mistake. It means the layer above misunderstands its mandate, so the whole proposal is refused",
+        "Correcting that silently would ship the misunderstanding inside a plausible-looking book"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Why the engine owns the stop",
+      "items": [
+        "NAV is known to the engine and, in live trading, to the broker \u2014 never to the model",
+        "A strategy is told its drawdown through observe(), but it cannot decline to be stopped",
+        "Re-entering once the drawdown recovers is unreachable: a flat book's NAV never moves, so it can never reach a new high. A cooldown is the only restart that terminates"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "None of this counts until three tests pass",
+      "items": [
+        "Permutation: hand each day's weights to random tradeable names. Phase 0 scored p = 0.295 \u2014 random portfolios of the same shape did as well",
+        "Deflated Sharpe: charge for every look. It passed at 99.4%, so the return is real \u2014 it just did not come from selection",
+        "Bootstrap: resample the curve. It set the drawdown stop, after 15% was measured to fire on 93% of paths"
+      ]
+    }
+  ]
+}

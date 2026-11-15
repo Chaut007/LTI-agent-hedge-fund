@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5d712a5f-fb2e-45d1-adc0-807733908071",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "C:\\Users\\jojoj\\Project\\hedge_fund\\.archify\\workflow-decision-logic-20261115-190612\\candidate.json",
+  "output": "C:\\Users\\jojoj\\Project\\hedge_fund\\.archify\\workflow-decision-logic-20261115-190612\\decision-logic.html",
+  "specification": {
+    "sha256": "33b44417f3cd570a7726d6f9b1217ea66a7b56c6d8330608dc63ecc975cb006a",
+    "bytes": 7141
+  },
+  "artifact": {
+    "sha256": "d7a9be463c93b614e428c67760fbcd0a8c2ce271946bfc9007717a3095d94265",
+    "bytes": 828307
+  }
+}
