@@ -1,5 +1,7 @@
 # hedge_fund
 
+[![tests](https://github.com/Chaut007/LTI-agent-hedge-fund/actions/workflows/tests.yml/badge.svg)](https://github.com/Chaut007/LTI-agent-hedge-fund/actions/workflows/tests.yml)
+
 Multi-agent systematic equity strategy. US large caps, daily rebalance, paper
 trading first.
 
