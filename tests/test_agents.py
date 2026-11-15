@@ -338,11 +338,18 @@ def test_confidence_falls_as_filings_age(synthetic) -> None:
 
 
 def test_ttm_sums_four_quarters(synthetic) -> None:
+    """The fixture files consecutive quarters and no annual, so this is the 4q path.
+
+    The tag records which construction produced the number: `:ttm` is annual
+    plus delta, `:4q` is four consecutive quarters, `:annual` is a stale
+    fallback. That distinction is the audit trail for a figure whose
+    provenance decides whether it can be trusted.
+    """
     view = synthetic.lake.view(synthetic.asof)
     out = f.trailing_twelve_months(view, list(synthetic.tickers), ("NetIncomeLoss",))
     # T00's quarterly net income is 1e8; four of them is 4e8.
     assert out["T00"].value == pytest.approx(4e8)
-    assert out["T00"].tag.endswith(":ttm")
+    assert out["T00"].tag.endswith(":4q")
 
 
 def test_ttm_declines_with_fewer_than_four_quarters(synthetic) -> None:
@@ -370,7 +377,10 @@ def test_ratio_drops_non_positive_denominators() -> None:
     den = {"A": f.Fact(-5.0, date(2024, 1, 2), "d"), "B": f.Fact(5.0, date(2024, 1, 2), "d")}
     out = f.ratio(num, den)
     assert set(out) == {"B"}, "negative book equity is not a bargain"
-    assert out["B"].filed == date(2024, 1, 2), "keeps the newer filing date"
+    assert out["B"].filed == date(2024, 1, 1), (
+        "keeps the STALER filing date: a ratio is only as current as its oldest "
+        "input, and reporting the newer one hid a 2009 numerator behind a 2024 date"
+    )
 
 
 def test_ratio_can_allow_negative_denominators() -> None:
@@ -409,3 +419,194 @@ def test_agents_cannot_see_past_asof(synthetic) -> None:
     for agent in phase_0_agents():
         for signal in agent.evaluate(ctx):
             assert signal.asof == mid
+
+
+# -- TTM on EDGAR's real shape: the annual hole and the abandoned tag ----------
+#
+# Both bugs below were found on first contact with real filings and were silent:
+# they produced plausible-looking dollar totals, not errors.
+
+
+def _ttm_lake(tmp_path, rows: list[dict], name: str = "ttm") -> Context:
+    lake = Lake(tmp_path / name)
+    days = pd.bdate_range("2024-05-01", periods=5)
+    lake.write(
+        PRICES,
+        pd.DataFrame(
+            [
+                {"ticker": "X", "date": d.date(), "open": 10.0, "high": 10.0,
+                 "low": 10.0, "close": 10.0, "adj_close": 10.0, "volume": 1e6}
+                for d in days
+            ],
+            columns=PRICE_COLUMNS,
+        ),
+    )
+    lake.write(FUNDAMENTALS, pd.DataFrame(rows, columns=FUNDAMENTAL_COLUMNS))
+    asof = date(2024, 6, 28)
+    return Context(asof=asof, view=lake.view(asof), universe=("X",))
+
+
+def _flow(tag, start, end, value, filed, taxonomy="us-gaap"):
+    return f_row("X", tag, taxonomy, "USD", value, end, filed, start, f"{tag}-{end}")
+
+
+def test_ttm_uses_annual_plus_delta_across_the_q4_hole(tmp_path) -> None:
+    """A 10-K filer reports no Q4 quarterly, so four consecutive quarters do
+    not exist. TTM = annual + quarters since - same quarters a year before."""
+    rows = [
+        # FY2023 annual: 1000, year ending 2023-12-31
+        _flow("Revenues", date(2023, 1, 1), date(2023, 12, 31), 1000.0, date(2024, 2, 15)),
+        # Q1 2024 = 300, and Q1 2023 = 200 -> TTM should be 1000 + 300 - 200 = 1100
+        _flow("Revenues", date(2024, 1, 1), date(2024, 3, 31), 300.0, date(2024, 5, 1)),
+        _flow("Revenues", date(2023, 1, 1), date(2023, 3, 31), 200.0, date(2023, 5, 1)),
+        _flow("Revenues", date(2023, 4, 1), date(2023, 6, 30), 210.0, date(2023, 8, 1)),
+        _flow("Revenues", date(2023, 7, 1), date(2023, 9, 30), 220.0, date(2023, 11, 1)),
+        # note: no 2023 Q4 quarterly fact, exactly as a 10-K filer behaves
+    ]
+    out = f.trailing_twelve_months(_ttm_lake(tmp_path, rows).view, ["X"], ("Revenues",))
+    assert out["X"].value == pytest.approx(1100.0)
+    assert out["X"].tag.endswith(":ttm")
+    assert out["X"].filed == date(2024, 5, 1), "the newest filing the sum rests on"
+
+
+def test_ttm_rejects_a_window_that_does_not_tile_a_year(tmp_path) -> None:
+    """Four quarters spanning 15 months with a hole are not a TTM.
+
+    Measured consequence of accepting one: NVDA scored a gross margin of
+    438.9% and AAPL's window spanned 455 days skipping a whole quarter.
+    """
+    rows = [
+        _flow("Revenues", date(2023, 1, 1), date(2023, 3, 31), 100.0, date(2023, 5, 1)),
+        _flow("Revenues", date(2023, 4, 1), date(2023, 6, 30), 100.0, date(2023, 8, 1)),
+        # a hole where Jul-Dec 2023 should be
+        _flow("Revenues", date(2024, 1, 1), date(2024, 3, 31), 100.0, date(2024, 5, 1)),
+        _flow("Revenues", date(2024, 4, 1), date(2024, 6, 30), 100.0, date(2024, 6, 20)),
+    ]
+    out = f.trailing_twelve_months(_ttm_lake(tmp_path, rows).view, ["X"], ("Revenues",))
+    assert out == {}, "a gapped window must be declined, not summed to 400"
+
+
+def test_ttm_accepts_four_genuinely_consecutive_quarters(tmp_path) -> None:
+    rows = [
+        _flow("Revenues", date(2023, 7, 1), date(2023, 9, 30), 100.0, date(2023, 11, 1)),
+        _flow("Revenues", date(2023, 10, 1), date(2023, 12, 31), 110.0, date(2024, 2, 1)),
+        _flow("Revenues", date(2024, 1, 1), date(2024, 3, 31), 120.0, date(2024, 5, 1)),
+        _flow("Revenues", date(2024, 4, 1), date(2024, 6, 30), 130.0, date(2024, 6, 20)),
+    ]
+    out = f.trailing_twelve_months(_ttm_lake(tmp_path, rows).view, ["X"], ("Revenues",))
+    assert out["X"].value == pytest.approx(460.0)
+    assert out["X"].tag.endswith(":4q")
+
+
+def test_ttm_prefers_the_freshest_tag_not_the_first(tmp_path) -> None:
+    """Filers migrate between revenue tags and leave the old one frozen.
+
+    NVDA's RevenueFromContractWithCustomer... stops in 2020 while its Revenues
+    runs to 2024. Taking the first tag that returned anything gave a 2020
+    figure, 86% below the published number.
+    """
+    stale, live = f.REVENUE_TAGS[0], f.REVENUE_TAGS[1]
+    rows = [
+        # the abandoned tag: a complete, valid, but four-year-old year
+        _flow(stale, date(2019, 1, 1), date(2019, 3, 31), 10.0, date(2019, 5, 1)),
+        _flow(stale, date(2019, 4, 1), date(2019, 6, 30), 10.0, date(2019, 8, 1)),
+        _flow(stale, date(2019, 7, 1), date(2019, 9, 30), 10.0, date(2019, 11, 1)),
+        _flow(stale, date(2019, 10, 1), date(2019, 12, 31), 10.0, date(2020, 2, 1)),
+        # the live tag: current and much larger
+        _flow(live, date(2023, 7, 1), date(2023, 9, 30), 500.0, date(2023, 11, 1)),
+        _flow(live, date(2023, 10, 1), date(2023, 12, 31), 500.0, date(2024, 2, 1)),
+        _flow(live, date(2024, 1, 1), date(2024, 3, 31), 500.0, date(2024, 5, 1)),
+        _flow(live, date(2024, 4, 1), date(2024, 6, 30), 500.0, date(2024, 6, 20)),
+    ]
+    out = f.trailing_twelve_months(_ttm_lake(tmp_path, rows).view, ["X"], f.REVENUE_TAGS)
+    assert out["X"].value == pytest.approx(2000.0), "the stale tag must not win"
+    assert out["X"].tag.startswith(live)
+
+
+def test_ttm_falls_back_to_annual_when_quarters_are_unusable(tmp_path) -> None:
+    """JPM's quarterly Revenues stop in 2014; the annual is the honest answer."""
+    rows = [
+        _flow("Revenues", date(2023, 1, 1), date(2023, 12, 31), 900.0, date(2024, 2, 16)),
+        _flow("Revenues", date(2014, 7, 1), date(2014, 9, 30), 50.0, date(2014, 11, 3)),
+    ]
+    out = f.trailing_twelve_months(_ttm_lake(tmp_path, rows).view, ["X"], ("Revenues",))
+    assert out["X"].value == pytest.approx(900.0)
+    assert out["X"].tag.endswith(":annual")
+    assert out["X"].age_days(date(2024, 6, 28)) == 133, "staleness is visible to the agent"
+
+
+def test_ttm_declines_when_nothing_is_usable(tmp_path) -> None:
+    """XOM exposes no usable revenue tag; an empty result beats a wrong one."""
+    rows = [_flow("Revenues", date(2024, 1, 1), date(2024, 3, 31), 100.0, date(2024, 5, 1))]
+    out = f.trailing_twelve_months(_ttm_lake(tmp_path, rows).view, ["X"], ("Revenues",))
+    assert out == {}
+
+
+def test_latest_instant_prefers_the_freshest_tag(tmp_path) -> None:
+    rows = [
+        f_row("X", f.SHARE_TAGS[1], "us-gaap", "shares", 1e6, date(2020, 3, 31),
+              date(2020, 5, 1), None, "old"),
+        f_row("X", f.SHARE_TAGS[0], "dei", "shares", 5e6, date(2024, 3, 31),
+              date(2024, 5, 1), None, "new"),
+    ]
+    out = f.latest_instant(_ttm_lake(tmp_path, rows).view, ["X"], f.SHARE_TAGS)
+    assert out["X"].value == pytest.approx(5e6)
+    assert out["X"].filed == date(2024, 5, 1)
+
+
+def test_ratio_keeps_the_stalest_filing_not_the_freshest(tmp_path) -> None:
+    """A ratio is only as current as its oldest input.
+
+    Amazon stopped filing GrossProfit in 2010, so a 2024 revenue over a 2009
+    gross profit produced a 0.9% "gross margin" that no staleness score
+    flagged, because the ratio reported the newer of its two dates.
+    """
+    fresh = {"X": f.Fact(100.0, date(2024, 5, 1), "new")}
+    stale = {"X": f.Fact(50.0, date(2010, 1, 29), "old")}
+    out = f.ratio(fresh, stale)
+    assert out["X"].filed == date(2010, 1, 29), "the ratio must inherit the old date"
+
+
+def test_ratio_drops_a_pairing_that_is_too_old_to_mean_anything(tmp_path) -> None:
+    fresh = {"X": f.Fact(100.0, date(2024, 5, 1), "new")}
+    ancient = {"X": f.Fact(50.0, date(2010, 1, 29), "old")}
+    assert f.ratio(fresh, ancient, asof=date(2024, 6, 28)) == {}
+    recent = {"X": f.Fact(50.0, date(2024, 2, 1), "ok")}
+    assert f.ratio(fresh, recent, asof=date(2024, 6, 28))["X"].value == pytest.approx(2.0)
+
+
+def test_oldest_filing_is_what_confidence_must_use() -> None:
+    a = {"X": f.Fact(1.0, date(2024, 5, 1), "a")}
+    b = {"X": f.Fact(1.0, date(2019, 3, 1), "b")}
+    assert f.oldest_filing(a, b) == {"X": date(2019, 3, 1)}
+    assert f.newest_filing(a, b) == {"X": date(2024, 5, 1)}
+
+
+def test_market_cap_prefers_diluted_when_the_cover_page_loses_a_class(tmp_path) -> None:
+    """Visa's cover page reports Class A only: 469m against ~2,000m actual."""
+    rows = [
+        # cover page: one class only
+        f_row("X", f.SHARE_TAGS[1], "dei", "shares", 469e6, date(2024, 3, 31),
+              date(2024, 4, 24), None, "cover"),
+        # consolidated diluted count, a period fact
+        f_row("X", "WeightedAverageNumberOfDilutedSharesOutstanding", "us-gaap",
+              "shares", 2000e6, date(2024, 3, 31), date(2024, 4, 24),
+              date(2024, 1, 1), "diluted"),
+    ]
+    ctx = _ttm_lake(tmp_path, rows, name="cap")
+    cap = f.market_cap(ctx.view, ["X"])
+    assert cap["X"].value == pytest.approx(2000e6 * 10.0), "price is 10.0 in the fixture"
+    assert "Diluted" in cap["X"].tag
+
+
+def test_market_cap_keeps_the_cover_page_when_it_is_consistent(tmp_path) -> None:
+    rows = [
+        f_row("X", f.SHARE_TAGS[1], "dei", "shares", 1000e6, date(2024, 3, 31),
+              date(2024, 4, 24), None, "cover"),
+        f_row("X", "WeightedAverageNumberOfDilutedSharesOutstanding", "us-gaap",
+              "shares", 1010e6, date(2024, 3, 31), date(2024, 4, 24),
+              date(2024, 1, 1), "diluted"),
+    ]
+    ctx = _ttm_lake(tmp_path, rows, name="cap2")
+    cap = f.market_cap(ctx.view, ["X"])
+    assert cap["X"].value == pytest.approx(1000e6 * 10.0)

@@ -52,8 +52,8 @@ class ValueAgent(BaseAgent):
         earnings = f.trailing_twelve_months(ctx.view, tickers, NET_INCOME)
         equity = f.latest_instant(ctx.view, tickers, f.EQUITY_TAGS)
 
-        earnings_yield = f.ratio(earnings, caps)
-        book_to_price = f.ratio(equity, caps)
+        earnings_yield = f.ratio(earnings, caps, asof=ctx.asof)
+        book_to_price = f.ratio(equity, caps, asof=ctx.asof)
 
         scores = combine_scores(
             {
@@ -61,7 +61,8 @@ class ValueAgent(BaseAgent):
                 "book_to_price": cross_sectional_scores(f.values(book_to_price)),
             }
         )
-        filings = f.newest_filing(earnings_yield, book_to_price)
+        # Oldest, not newest: a composite is as stale as its stalest part.
+        filings = f.oldest_filing(earnings_yield, book_to_price)
 
         out: list[Signal] = []
         for ticker, score in scores.items():
@@ -109,9 +110,9 @@ class QualityAgent(BaseAgent):
         equity = f.latest_instant(ctx.view, tickers, f.EQUITY_TAGS)
         debt = f.latest_instant(ctx.view, tickers, f.DEBT_TAGS)
 
-        roe = f.ratio(earnings, equity)
-        leverage = f.ratio(debt, equity)
-        margin = f.ratio(gross, revenue)
+        roe = f.ratio(earnings, equity, asof=ctx.asof)
+        leverage = f.ratio(debt, equity, asof=ctx.asof)
+        margin = f.ratio(gross, revenue, asof=ctx.asof)
 
         scores = combine_scores(
             {
@@ -123,7 +124,7 @@ class QualityAgent(BaseAgent):
             },
             min_parts=self.min_ratios,
         )
-        filings = f.newest_filing(roe, leverage, margin)
+        filings = f.oldest_filing(roe, leverage, margin)
 
         out: list[Signal] = []
         for ticker, score in scores.items():
