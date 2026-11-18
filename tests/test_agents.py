@@ -610,3 +610,61 @@ def test_market_cap_keeps_the_cover_page_when_it_is_consistent(tmp_path) -> None
     ctx = _ttm_lake(tmp_path, rows, name="cap2")
     cap = f.market_cap(ctx.view, ["X"])
     assert cap["X"].value == pytest.approx(1000e6 * 10.0)
+
+
+# --- dual-currency filers -------------------------------------------------
+# Foreign private issuers file the same fact in their home currency and in
+# USD. Found on real EDGAR data for HDFC Bank: Liabilities in INR over
+# StockholdersEquity in USD gave a debt/equity of 644, and book-to-price came
+# out at 18.05 against a true 0.29 — which would have ranked it the cheapest
+# name in a 500-stock universe. Nothing downstream can detect that.
+
+
+def test_ratio_refuses_to_divide_across_currencies() -> None:
+    inr = {"HDB": f.Fact(2.6e12, date(2024, 6, 1), "Liabilities", "INR")}
+    usd = {"HDB": f.Fact(4.0e9, date(2024, 6, 1), "StockholdersEquity", "USD")}
+    assert f.ratio(inr, usd) == {}
+
+
+def test_ratio_still_divides_when_the_units_agree() -> None:
+    num = {"T": f.Fact(200.0, date(2024, 6, 1), "NetIncomeLoss", "USD")}
+    den = {"T": f.Fact(1000.0, date(2024, 6, 1), "MarketCap", "USD")}
+    assert f.ratio(num, den)["T"].value == pytest.approx(0.2)
+
+
+def test_ratio_allows_an_unlabelled_unit() -> None:
+    """An empty unit means unknown, not mismatched.
+
+    Facts assembled before this distinction existed carry no unit; refusing
+    them would silently empty the book rather than fix anything.
+    """
+    num = {"T": f.Fact(200.0, date(2024, 6, 1), "NetIncomeLoss")}
+    den = {"T": f.Fact(1000.0, date(2024, 6, 1), "MarketCap", "USD")}
+    assert f.ratio(num, den)["T"].value == pytest.approx(0.2)
+
+
+def test_a_series_reported_in_two_currencies_keeps_only_usd() -> None:
+    frame = pd.DataFrame(
+        [
+            {"period_end": date(2024, 3, 31), "filed": date(2024, 5, 1),
+             "value": 2.6e12, "unit": "INR"},
+            {"period_end": date(2024, 3, 31), "filed": date(2024, 5, 1),
+             "value": 31.0e9, "unit": "USD"},
+        ]
+    )
+    kept = f._dedupe_by_period(frame)
+    assert list(kept["unit"]) == ["USD"]
+    assert kept["value"].iloc[0] == pytest.approx(31.0e9)
+
+
+def test_a_series_in_one_foreign_currency_is_kept_not_dropped() -> None:
+    """No USD on file is not a reason to discard the filer.
+
+    `ratio` is what refuses the cross-currency pair; dropping here instead
+    would lose facts that are perfectly usable against each other.
+    """
+    frame = pd.DataFrame(
+        [{"period_end": date(2024, 3, 31), "filed": date(2024, 5, 1),
+          "value": 500.0, "unit": "EUR"}]
+    )
+    assert list(f._dedupe_by_period(frame)["unit"]) == ["EUR"]

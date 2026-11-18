@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Mapping, Sequence
 
+import numpy as np
 import pandas as pd
 
 from hedge_fund.core.agent import MarketView
@@ -53,6 +54,9 @@ class Fact:
     value: float
     filed: date
     tag: str
+    unit: str = ""
+    """Currency or denomination. Empty means unknown, which `ratio` allows;
+    two *known* and different units are refused."""
 
     def age_days(self, asof: date) -> int:
         return (asof - self.filed).days
@@ -75,6 +79,9 @@ def latest_instant(
     frame = view.latest_fundamentals(tickers, list(tags), period_kind="instant")
     out: dict[str, Fact] = {}
     for ticker, rows in _rows_by_ticker(frame).items():
+        # latest_fundamentals keys on unit, so a dual-currency filer arrives
+        # here with one row per currency per tag.
+        rows = _single_unit(rows)
         # Freshest tag wins, for the same reason as in `trailing_twelve_months`:
         # a filer that switched tags leaves the old one populated but frozen.
         candidates = []
@@ -82,7 +89,9 @@ def latest_instant(
             match = rows[rows["tag"] == tag]
             if not match.empty:
                 row = match.sort_values(["filed", "period_end"]).iloc[-1]
-                candidates.append(Fact(float(row["value"]), row["filed"], tag))
+                candidates.append(
+                    Fact(float(row["value"]), row["filed"], tag, str(row["unit"]))
+                )
         if candidates:
             out[ticker] = max(candidates, key=lambda fact: fact.filed)
     return out
@@ -127,13 +136,47 @@ def _tiles_a_year(quarters: pd.DataFrame) -> bool:
 YEAR_MATCH_TOLERANCE = 15
 
 
+#: Currency to use when a filer reports the same fact in several. Foreign
+#: private issuers file in their home currency and in USD; 43 names in a
+#: 500-name universe do, and mixing them is undetectable downstream.
+PREFERRED_UNIT = "USD"
+
+
+def _single_unit(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep one currency.
+
+    HDFC Bank reports Liabilities in INR and StockholdersEquity in USD for the
+    same period. Dividing across them gave a debt/equity of 644, filed date
+    intact and confidence 1.00 — a plausible-looking number no downstream
+    check could catch. Prefer USD; otherwise the most-reported unit, chosen
+    deterministically so the same lake gives the same answer twice.
+    """
+    if frame.empty or "unit" not in frame.columns:
+        return frame
+    units = frame["unit"].dropna().unique()
+    if len(units) <= 1:
+        return frame
+    if PREFERRED_UNIT in units:
+        return frame[frame["unit"] == PREFERRED_UNIT]
+    counts = frame["unit"].value_counts()
+    winner = sorted(counts[counts == counts.max()].index)[0]
+    return frame[frame["unit"] == winner]
+
+
 def _dedupe_by_period(frame: pd.DataFrame) -> pd.DataFrame:
-    """One row per period end, newest filing winning, sorted by period end."""
+    """One row per period end, newest filing winning, sorted by period end.
+
+    drop_duplicates rather than groupby().last(): this runs once per
+    (ticker, tag) — thousands of times per rebalance on frames of a few dozen
+    rows — and groupby pays about 6 ms of fixed overhead regardless of size.
+    It also keeps one filing's row intact; groupby().last() takes the last
+    non-NA value per column independently, which can splice two filings
+    together.
+    """
     return (
-        frame.sort_values(["period_end", "filed"])
-        .groupby("period_end", as_index=False)
-        .last()
-        .sort_values("period_end")
+        _single_unit(frame)
+        .sort_values(["period_end", "filed"], kind="stable")
+        .drop_duplicates("period_end", keep="last")
         .reset_index(drop=True)
     )
 
@@ -154,17 +197,20 @@ def _contiguous_tail(quarters: pd.DataFrame, after: date) -> pd.DataFrame:
 
 def _match_prior_year(quarters: pd.DataFrame, window: pd.DataFrame) -> pd.DataFrame | None:
     """The same quarters one year earlier, or None if any is missing."""
+    # Ordinals once, rather than a Python lambda per row per target: these
+    # are object columns of datetime.date, so .apply() was the single most
+    # expensive call in a rebalance.
+    ends = np.fromiter(
+        (e.toordinal() for e in quarters["period_end"]), dtype=np.int64,
+        count=len(quarters),
+    )
     rows = []
     for target in window["period_end"]:
-        wanted = target - timedelta(days=365)
-        candidates = quarters[
-            quarters["period_end"].apply(
-                lambda e: abs((e - wanted).days) <= YEAR_MATCH_TOLERANCE
-            )
-        ]
-        if len(candidates) != 1:
+        wanted = (target - timedelta(days=365)).toordinal()
+        hits = np.flatnonzero(np.abs(ends - wanted) <= YEAR_MATCH_TOLERANCE)
+        if len(hits) != 1:
             return None
-        rows.append(candidates.iloc[0])
+        rows.append(quarters.iloc[hits[0]])
     return pd.DataFrame(rows)
 
 
@@ -198,17 +244,20 @@ def trailing_twelve_months(
     Three quarters are never annualised to four: scaling nine months by 4/3
     invents a quarter, and for a seasonal business it invents the wrong one.
     """
-    quarterly_all = view.fundamentals(tickers, list(tags))
-    annual_all = view.fundamentals(tickers, list(tags))
-    by_ticker_q = _rows_by_ticker(quarterly_all)
-    by_ticker_a = _rows_by_ticker(annual_all)
+    # One query. This used to issue the identical query twice and group the
+    # identical result twice, which is pure duplicated work on the hottest
+    # path in a rebalance.
+    by_ticker = _rows_by_ticker(view.fundamentals(tickers, list(tags)))
     out: dict[str, Fact] = {}
 
     for ticker in tickers:
-        rows_q = by_ticker_q.get(ticker)
-        rows_a = by_ticker_a.get(ticker)
-        if rows_q is None and rows_a is None:
+        rows = by_ticker.get(ticker)
+        if rows is None or rows.empty:
             continue
+        kind = rows["period_kind"]
+        quarterly, annual = rows[kind == "quarterly"], rows[kind == "annual"]
+        rows_q = {t: g for t, g in quarterly.groupby("tag", sort=False)}
+        rows_a = {t: g for t, g in annual.groupby("tag", sort=False)}
         # Every tag is tried and the FRESHEST answer wins — not the first one
         # that happens to work. Filers migrate between revenue tags, and a
         # static preference order silently locks onto one they abandoned:
@@ -219,7 +268,9 @@ def trailing_twelve_months(
         # tiebreaker between tags of equal freshness.
         candidates = [
             fact
-            for fact in (_ttm_for_tag(rows_q, rows_a, tag) for tag in tags)
+            for fact in (
+                _ttm_for_tag(rows_q.get(tag), rows_a.get(tag), tag) for tag in tags
+            )
             if fact is not None
         ]
         if candidates:
@@ -230,14 +281,17 @@ def trailing_twelve_months(
 def _ttm_for_tag(
     rows_q: pd.DataFrame | None, rows_a: pd.DataFrame | None, tag: str
 ) -> Fact | None:
+    """`rows_q` / `rows_a` are this ticker's rows for this tag, already split
+    by period kind. The caller does that split once per ticker; doing it here
+    meant two boolean masks over the same frame for every tag tried."""
     quarters = (
-        _dedupe_by_period(rows_q[(rows_q["tag"] == tag) & (rows_q["period_kind"] == "quarterly")])
-        if rows_q is not None
+        _dedupe_by_period(rows_q)
+        if rows_q is not None and not rows_q.empty
         else pd.DataFrame()
     )
     annuals = (
-        _dedupe_by_period(rows_a[(rows_a["tag"] == tag) & (rows_a["period_kind"] == "annual")])
-        if rows_a is not None
+        _dedupe_by_period(rows_a)
+        if rows_a is not None and not rows_a.empty
         else pd.DataFrame()
     )
 
@@ -257,7 +311,7 @@ def _ttm_for_tag(
                     filed = max(
                         [annual["filed"], *since["filed"], *prior["filed"]]
                     )
-                    return Fact(value, filed, f"{tag}:ttm")
+                    return Fact(value, filed, f"{tag}:ttm", str(annual["unit"]))
 
     # -- 2. four consecutive quarters that tile a year ------------------------
     if len(quarters) >= 4:
@@ -268,12 +322,16 @@ def _ttm_for_tag(
                     float(candidate["value"].sum()),
                     max(candidate["filed"]),
                     f"{tag}:4q",
+                    str(candidate["unit"].iloc[-1]),
                 )
 
     # -- 3. the latest annual, stale and flagged ------------------------------
     if not annuals.empty:
         annual = annuals.iloc[-1]
-        return Fact(float(annual["value"]), annual["filed"], f"{tag}:annual")
+        return Fact(
+            float(annual["value"]), annual["filed"], f"{tag}:annual",
+            str(annual["unit"]),
+        )
     return None
 
 
@@ -320,7 +378,8 @@ def diluted_shares(view: MarketView, tickers: Sequence[str]) -> dict[str, Fact]:
         row = usable.sort_values(["filed", "period_end"]).iloc[-1]
         if row["value"] > 0:
             out[ticker] = Fact(
-                float(row["value"]), row["filed"], "WeightedAverageDilutedShares"
+                float(row["value"]), row["filed"],
+                "WeightedAverageDilutedShares", "shares",
             )
     return out
 
@@ -370,7 +429,10 @@ def market_cap(view: MarketView, tickers: Sequence[str]) -> dict[str, Fact]:
                 chosen = alternative
         if chosen is None or chosen.value <= 0:
             continue
-        out[ticker] = Fact(chosen.value * price, chosen.filed, chosen.tag)
+        # USD by construction: a share count times a price off the US tape.
+        # This is the anchor that lets `ratio` catch a foreign-currency
+        # numerator — without it there is nothing to compare a unit against.
+        out[ticker] = Fact(chosen.value * price, chosen.filed, chosen.tag, "USD")
     return out
 
 
@@ -409,10 +471,18 @@ def ratio(
             continue
         if require_positive_denominator and den.value <= 0.0:
             continue
+        if num.unit and den.unit and num.unit != den.unit:
+            # INR over USD is not a ratio, it is an exchange rate nobody
+            # applied. Dropping the ticker is the only honest answer: this
+            # lake holds no FX series to convert with.
+            continue
         filed = min(num.filed, den.filed)
         if asof is not None and (asof - filed).days > max_age_days:
             continue
-        out[ticker] = Fact(num.value / den.value, filed, f"{num.tag}/{den.tag}")
+        out[ticker] = Fact(
+            num.value / den.value, filed, f"{num.tag}/{den.tag}",
+            unit="" if num.unit == den.unit else num.unit,
+        )
     return out
 
 
