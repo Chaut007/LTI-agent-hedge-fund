@@ -508,3 +508,17 @@ def test_sharpe_is_blind_to_cash_but_cagr_is_not(lake: Lake) -> None:
     assert full.metrics.sharpe == pytest.approx(half.metrics.sharpe, rel=1e-9)
     assert half.metrics.cagr < full.metrics.cagr
     assert half.metrics.mean_gross_exposure < full.metrics.mean_gross_exposure
+
+
+def test_a_name_with_no_prices_is_never_offered_to_an_agent(lake) -> None:
+    """A universe entry with no price history is not a tradeable instrument.
+
+    The 500-name universe held 11 recent IPOs and delistings that had filings
+    but no bars. They reached the agents, were scored, were weighted, and the
+    engine refused the whole run on its first decision.
+    """
+    from hedge_fund.backtest.engine import Backtester
+
+    bt = Backtester(lake, ["AAA", "BBB", "GHOST"])
+    assert bt.tradeable == ("AAA", "BBB")
+    assert "GHOST" in bt.universe  # narrowed for agents, not silently forgotten

@@ -79,14 +79,15 @@ def latest_instant(
     frame = view.latest_fundamentals(tickers, list(tags), period_kind="instant")
     out: dict[str, Fact] = {}
     for ticker, rows in _rows_by_ticker(frame).items():
-        # latest_fundamentals keys on unit, so a dual-currency filer arrives
-        # here with one row per currency per tag.
-        rows = _single_unit(rows)
         # Freshest tag wins, for the same reason as in `trailing_twelve_months`:
         # a filer that switched tags leaves the old one populated but frozen.
         candidates = []
         for tag in tags:
-            match = rows[rows["tag"] == tag]
+            # Per tag, not per ticker: latest_fundamentals keys on unit, so a
+            # dual-currency filer arrives with one row per currency. Narrowing
+            # across the whole tag list instead would let a dollar tag evict a
+            # share-count tag whenever both are asked for at once.
+            match = _single_unit(rows[rows["tag"] == tag])
             if not match.empty:
                 row = match.sort_values(["filed", "period_end"]).iloc[-1]
                 candidates.append(

@@ -668,3 +668,37 @@ def test_a_series_in_one_foreign_currency_is_kept_not_dropped() -> None:
           "value": 500.0, "unit": "EUR"}]
     )
     assert list(f._dedupe_by_period(frame)["unit"]) == ["EUR"]
+
+
+def test_narrowing_currency_never_evicts_a_share_count() -> None:
+    """Share counts and dollar amounts must not compete for one 'unit'.
+
+    `latest_instant` is asked for a family of tags at a time. Narrowing
+    across the whole family rather than per tag would let a USD equity tag
+    delete the shares-denominated tag beside it, and market cap would lose
+    its share count without any error.
+    """
+    frame = pd.DataFrame(
+        [
+            {"ticker": "T", "tag": "StockholdersEquity", "unit": "USD",
+             "value": 100.0, "filed": date(2024, 5, 1),
+             "period_end": date(2024, 3, 31), "period_kind": "instant"},
+            {"ticker": "T", "tag": "CommonStockSharesOutstanding", "unit": "shares",
+             "value": 50.0, "filed": date(2024, 5, 1),
+             "period_end": date(2024, 3, 31), "period_kind": "instant"},
+        ]
+    )
+
+    class _View:
+        asof = date(2024, 6, 1)
+
+        def latest_fundamentals(self, tickers, tags, period_kind=None):
+            return frame[frame["tag"].isin(tags)]
+
+    both = f.latest_instant(
+        _View(), ["T"], ["StockholdersEquity", "CommonStockSharesOutstanding"]
+    )
+    assert both["T"].unit in {"USD", "shares"}
+    shares = f.latest_instant(_View(), ["T"], ["CommonStockSharesOutstanding"])
+    assert shares["T"].value == pytest.approx(50.0)
+    assert shares["T"].unit == "shares"

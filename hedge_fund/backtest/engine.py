@@ -220,8 +220,25 @@ class Backtester:
             self._panel = panel
         return self._panel
 
+    @property
+    def tradeable(self) -> tuple[str, ...]:
+        """Universe names the engine can actually mark to market.
+
+        A name with no prices anywhere in the lake is not a tradeable
+        instrument, and handing it to an agent only produces a weight the
+        engine must then refuse — which is how a 500-name universe with 489
+        priced names failed on its first decision.
+
+        Deliberately NOT the same as a name that has prices but none on a
+        given date. That one still raises: the panel and the decision
+        disagree about a name that does exist, and quietly skipping it would
+        hide a real inconsistency.
+        """
+        return tuple(t for t in self.universe if t in self.panel.columns)
+
     def run(self, strategy: Strategy, config: BacktestConfig) -> BacktestResult:
         panel = self.panel
+        tradeable = self.tradeable
 
         # Forward-fill so a gap day earns 0 and the full move lands when the
         # name prints again. Leading NaNs (pre-listing) stay NaN → 0 return; a
@@ -305,7 +322,9 @@ class Backtester:
                             halted=halted,
                         )
                     )
-                ctx = Context(asof=asof, view=self.lake.view(asof), universe=self.universe)
+                ctx = Context(
+                    asof=asof, view=self.lake.view(asof), universe=tradeable
+                )
                 weights = {} if halted else strategy.target_weights(ctx)
                 decisions[asof] = dict(weights)
                 pending[d] = _validate_weights(weights, tickers, config, asof)
