@@ -83,16 +83,39 @@ class TrialLog:
                     trials.append(Trial(**json.loads(line)))
         return iter(trials)
 
-    def distinct(self) -> list[Trial]:
-        """One Trial per trial_id, the most recent record winning."""
+    def distinct(self, start: date | None = None, end: date | None = None) -> list[Trial]:
+        """One Trial per trial_id, the most recent record winning.
+
+        With `start`/`end`, only trials evaluated over exactly that window.
+        """
         latest: dict[str, Trial] = {}
         for trial in self:
+            if start is not None and trial.start != start.isoformat():
+                continue
+            if end is not None and trial.end != end.isoformat():
+                continue
             latest[trial.trial_id] = trial
         return list(latest.values())
 
-    def sharpes(self) -> list[float]:
-        """Per-period Sharpe of every distinct trial, for `deflated_sharpe`."""
-        return [t.sharpe_period for t in self.distinct()]
+    def sharpes(
+        self, start: date | None = None, end: date | None = None
+    ) -> list[float]:
+        """Per-period Sharpe of each distinct trial, for `deflated_sharpe`.
+
+        **Pass the current run's window.** The Deflated Sharpe charges for
+        how many configurations were tried *on this data*, and it does so
+        through the variance of their Sharpes. Trials measured over a
+        different window are not alternative configurations of the same
+        experiment, and pooling them makes the charge meaningless.
+
+        Measured here: one 61-day smoke test, per-period Sharpe 0.3426
+        against a cluster at 0.065, raised the variance of 19 trials from
+        0.000011 to 0.004068 — a factor of 370. E[max SR] scales with its
+        square root, so the deflated Sharpe of a genuine nine-year run read
+        0.6% instead of passing. A short exploratory run silently
+        disqualified every real result in the log.
+        """
+        return [t.sharpe_period for t in self.distinct(start, end)]
 
     def __len__(self) -> int:
         return len(self.distinct())

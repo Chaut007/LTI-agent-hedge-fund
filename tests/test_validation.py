@@ -295,3 +295,52 @@ def test_missing_log_is_empty_not_error(tmp_path) -> None:
     assert list(log) == []
     assert log.sharpes() == []
     assert len(log) == 0
+
+
+# --- the Deflated Sharpe must compare like with like ----------------------
+
+
+def _trial(log, strategy, start, end, n_obs, sharpe_period, **params):
+    from hedge_fund.validation import Trial
+
+    log.append(
+        Trial.build(
+            strategy=strategy, params=params, start=start, end=end,
+            n_obs=n_obs, sharpe_period=sharpe_period,
+        )
+    )
+
+
+def test_a_short_run_is_not_pooled_with_a_long_one(tmp_path) -> None:
+    """A 61-day exploratory run is not a configuration of a nine-year test.
+
+    Measured on the real log: one such trial at 0.3426/day against a cluster
+    at 0.065 raised the variance of 19 trials by a factor of 370. E[max SR]
+    scales with its square root, so a genuine nine-year result's deflated
+    Sharpe read 0.6% instead of passing. Pooling windows lets any throwaway
+    run disqualify every real one.
+    """
+    from hedge_fund.validation import TrialLog
+
+    log = TrialLog(tmp_path / "trials.jsonl")
+    long_start, long_end = date(2016, 1, 1), date(2024, 12, 31)
+    for i, sr in enumerate((0.060, 0.065, 0.067)):
+        _trial(log, "s", long_start, long_end, 2264, sr, top_n=i)
+    _trial(log, "s", date(2024, 1, 1), date(2024, 3, 31), 61, 0.3426, top_n=50)
+
+    assert len(log.sharpes()) == 4
+    scoped = log.sharpes(long_start, long_end)
+    assert len(scoped) == 3
+    assert max(scoped) < 0.1
+
+
+def test_scoping_keeps_every_trial_on_the_window_asked_for(tmp_path) -> None:
+    from hedge_fund.validation import TrialLog
+
+    log = TrialLog(tmp_path / "trials.jsonl")
+    start, end = date(2016, 1, 1), date(2024, 12, 31)
+    for i, sr in enumerate((0.060, 0.065, 0.067, 0.071)):
+        _trial(log, "s", start, end, 2264, sr, top_n=i)
+
+    # Same window: every configuration tried on this data still counts.
+    assert sorted(log.sharpes(start, end)) == [0.060, 0.065, 0.067, 0.071]

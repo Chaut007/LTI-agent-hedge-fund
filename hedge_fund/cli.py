@@ -350,7 +350,9 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     report = validate(
         backtester,
         result,
-        trial_sharpes=log.sharpes(),
+        # Scoped to this run's window: a trial over a different period is
+        # not an alternative configuration of this experiment.
+        trial_sharpes=log.sharpes(config.start, config.end),
         n_permutations=args.permutations,
         n_bootstrap=args.bootstrap,
         kill_switch_dd=args.kill_switch_dd,
