@@ -166,3 +166,69 @@ def test_value_coercion_drops_unusable_rows() -> None:
     frame = facts_to_frame(flatten_company_facts(payload, "X", tags=["Assets"]))
     assert len(frame) == 1
     assert frame["value"].iloc[0] == pytest.approx(5.0)
+
+
+class _StubClient:
+    """Answers a fixed number of filers, then raises.
+
+    Stands in for the SEC timing out partway through a long run.
+    """
+
+    def __init__(self, fail_after: int) -> None:
+        self.fail_after = fail_after
+        self.calls = 0
+
+    def company_facts(self, cik: int) -> dict:
+        self.calls += 1
+        if self.calls > self.fail_after:
+            raise KeyboardInterrupt("interrupted mid-run")
+        return {
+            "cik": cik,
+            "facts": {
+                "us-gaap": {
+                    "Revenues": {
+                        "units": {
+                            "USD": [{
+                                "start": "2023-01-01", "end": "2023-12-31",
+                                "val": 1000.0 + cik, "accn": f"a-{cik}",
+                                "fy": 2023, "fp": "FY", "form": "10-K",
+                                "filed": "2024-02-01",
+                            }]
+                        }
+                    }
+                }
+            },
+        }
+
+    def close(self) -> None:
+        pass
+
+
+def test_interrupted_ingest_keeps_what_it_already_fetched(tmp_path, monkeypatch):
+    """A failure at filer 4 must not discard filers 1-3.
+
+    The ingest used to collect every row in memory and write once at the end,
+    so ten minutes of SEC requests could be lost to one timeout.
+    """
+    import pandas as pd
+
+    from hedge_fund.data import edgar
+    from hedge_fund.data.lake import Lake
+
+    lake = Lake(tmp_path / "lake")
+    universe = pd.DataFrame(
+        {"ticker": [f"T{i}" for i in range(6)], "cik": list(range(1, 7))}
+    )
+    client = _StubClient(fail_after=4)
+    monkeypatch.setattr(edgar, "SecClient", lambda settings: client)
+
+    with pytest.raises(KeyboardInterrupt):
+        edgar.ingest_fundamentals(
+            object(), lake, universe, flush_every=2, on_progress=None
+        )
+
+    kept = lake.unbounded_query(
+        "SELECT DISTINCT ticker FROM read_parquet(?)",
+        [str(lake.path(edgar.FUNDAMENTALS))],
+    )
+    assert sorted(kept["ticker"]) == ["T0", "T1", "T2", "T3"]

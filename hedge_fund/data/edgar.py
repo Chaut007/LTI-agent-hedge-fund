@@ -184,14 +184,24 @@ def facts_to_frame(rows: Iterable[dict[str, Any]]) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
+FLUSH_EVERY = 25
+"""Filers per write. A 500-name run is ten minutes of SEC requests; holding
+every row until the end means one timeout at filer 480 discards all of it."""
+
+
 def ingest_fundamentals(
     settings: Settings,
     lake: Lake,
     universe: pd.DataFrame,
     tags: Sequence[str] | None = DEFAULT_TAGS,
     on_progress: Callable[[str, int, int], None] | None = None,
+    flush_every: int = FLUSH_EVERY,
 ) -> EdgarReport:
-    """Fetch companyfacts for every filer in `universe` and merge into the lake."""
+    """Fetch companyfacts for every filer in `universe` and merge into the lake.
+
+    Writes in batches. The upsert is keyed, so a re-run after a failure
+    rewrites what landed rather than duplicating it.
+    """
     if universe.empty:
         raise ValueError("universe is empty — run `hf universe` first")
 
@@ -206,6 +216,18 @@ def ingest_fundamentals(
     errors: dict[str, str] = {}
     fetched = 0
     total = len(with_cik)
+
+    before = lake.row_count(FUNDAMENTALS)
+    after = before
+
+    def flush() -> None:
+        nonlocal after
+        if not collected:
+            return
+        _, after = lake.upsert(
+            FUNDAMENTALS, facts_to_frame(collected), keys=list(_UPSERT_KEYS)
+        )
+        collected.clear()
 
     try:
         for position, row in enumerate(with_cik.itertuples(index=False), start=1):
@@ -224,14 +246,14 @@ def ingest_fundamentals(
                 continue
             fetched += 1
             collected.extend(flatten_company_facts(payload, ticker, tags))
+            if flush_every > 0 and fetched % flush_every == 0:
+                flush()
     finally:
         client.close()
-
-    frame = facts_to_frame(collected)
-    # COUNT(*) through DuckDB rather than loading the whole table just to
-    # measure it; upsert reads it once more anyway.
-    before = lake.row_count(FUNDAMENTALS)
-    _, after = lake.upsert(FUNDAMENTALS, frame, keys=list(_UPSERT_KEYS))
+        # Keep whatever was fetched before the interruption, then let the
+        # exception continue. Losing ten minutes of SEC requests to a
+        # KeyboardInterrupt is avoidable.
+        flush()
 
     return EdgarReport(
         filers_requested=total,
