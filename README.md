@@ -7,8 +7,11 @@ trading first.
 
 **Status: Phase 0, steps 1-5 of 6 complete.** Contracts, data layer, a
 validated backtester, five factor agents and an enforced risk layer exist.
-**The agents do not beat equal weight, and step 5 proved execution cannot
-rescue them** — read both results below before building on this.
+**No configuration beats equal weight on risk-adjusted terms.** The three
+price factors have no cross-sectional edge at all; Value and Quality, tested
+on real filings for the full universe, have a small one that does not survive
+contact with the cheapest possible alternative. Step 5 proved execution
+cannot rescue either. Read all three results below before building on this.
 
 ## What is built
 
@@ -71,18 +74,59 @@ window — momentum crashed in 2020 and 2022, low-vol lagged a strong bull
 market, and short-term reversal in large caps has been largely arbitraged
 since the 2000s. It is an unsurprising result, not a bug.
 
-**Three price factors, not five.** Value and Quality have never produced a
-Signal from real data: the lake has never held real fundamentals, because the
-EDGAR ingest needs a `SEC_USER_AGENT` that only the user can supply. Two of
-the five agents are untested, and that is the single largest gap in this
-conclusion.
+**Three price factors, not five.** Value and Quality contributed almost
+nothing to the runs above: the lake held filings for 20 names, so both were
+silent for most of the universe on most dates. The verdict above is a verdict
+on momentum, low-vol and reversal. Value and Quality were measured separately
+once the filings existed — see the next section.
 
 **What this forbids:** adding Phase 1 LLM agents now, and tuning the three
 price factors. The trial log already holds 25+ entries and the Deflated
-Sharpe charges for every further look. The remaining honest step is to ingest
-real filings and test Value and Quality. (Step 5 has since answered the other
+Sharpe charges for every further look. (Step 5 has since answered the other
 possibility that was open here — that cheaper execution might close the gap.
 It does not; see below.)
+
+## Value and Quality, measured on real filings
+
+886k XBRL facts for 499 of 500 filers, so Value scores 326-383 names per date
+and Quality 234-272 — against 20 before. Same window, same costs, monthly,
+`tools/measure_fundamentals.sh`:
+
+| top-N held | 20 | 50 | 100 | 400 | equal weight (489) |
+|---|---|---|---|---|---|
+| Sharpe | **1.07** | 1.04 | 1.02 | 0.97 | **1.06** |
+| permutation p | 0.050 | 0.055 | 0.090 | 0.697 | — |
+| turnover/day | 0.69% | 0.58% | 0.49% | 0.39% | 0.16% |
+
+**The ranking carries information.** Unlike the price factors, this sweep is
+not flat: Sharpe falls and the p-value rises monotonically as the book widens,
+with no point out of order. Four points ordering themselves by chance is a
+1-in-24 event. The top of the ranking really is better than the bottom, which
+is a different finding from step 4's.
+
+**It is still not enough to beat equal weight.** The top-20 book passes the
+permutation test at p = 0.050 and the Deflated Sharpe at 99.8%, and it is the
+first PASS in this project. Four reasons it does not license trading it:
+
+- **The whole gain is risk, not skill.** top-20 runs at 1.079x equal weight's
+  volatility. Lever equal weight to that same volatility and it returns
+  +21.18%; top-20 returned +21.44%. Selection is worth **0.26pp of CAGR**.
+  Sharpe 1.07 against 1.06 is a 0.01 gap inside a bootstrap CI of [0.36, 1.81].
+- **p = 0.050 is the boundary, and four configurations were tried.** The
+  chance that at least one of four tests clears 5% by luck alone is 18.5%.
+- **The permutation test asks an easier question than it appears to.** Its
+  null is random portfolios *of the same shape* — random 20-name books, mean
+  Sharpe 0.89. Beating those is not beating a 489-name equal-weight book at
+  1.06, which it merely ties while paying 4.3x the turnover (3.12% cumulative
+  cost drag against 0.71%).
+- **Survivorship bias favours this factor specifically.** The universe is
+  today's top 500 backtested from 2016. Value buys what is cheap, and the
+  cheap names still in today's top 500 are the ones that recovered; the ones
+  that did not are absent. This bias hits a value factor harder than it hits
+  equal weight, and it is not correctable from free data.
+
+So: a real but small signal, smaller than the risk premium it rides on and
+smaller than the costs of harvesting it.
 
 **One known universe bias, stated plainly:** "top 500 by *today's* market
 cap, backtested from 2016" selects the companies that grew into the top 500.
@@ -278,15 +322,33 @@ Point-in-time index membership is a paid dataset (CRSP, Compustat). Until then:
 treat agent-vs-agent comparisons as meaningful (they share the bias) and
 absolute return levels as inflated by an unknown amount.
 
+The "they share the bias" defence is weaker for Value than for the others, and
+that matters for the one result in this repo that passes its tests. Value buys
+what is cheap; the cheap names still in today's top 500 are the ones that
+recovered, and the ones that did not are not in the universe at all. The bias
+is selecting on exactly the variable the factor trades. Read the top-20 result
+with that in mind.
+
 **Retroactive price adjustment.** `adj_close` is adjusted as of today, not as of
 each bar's own date. That is correct for computing returns and wrong for price
 levels. Use `close` for anything price-level, `adj_close` for returns.
 
 **Revised macro series.** FRED serves current values. Treasury yields and VIX
 are never revised, so those are point-in-time correct. CPI and unemployment
-*are* revised, sometimes months later, so the lake holds a cleaner series than
-anyone had live. `macro.REVISABLE` marks them. The fix is ALFRED vintages, worth
-doing when the macro agent becomes load-bearing.
+*are* revised, sometimes months later, so a lake holding them holds a cleaner
+series than anyone had live. `macro.REVISABLE` marks them, and `hf status`
+names only the ones actually ingested — a caveat printed about absent data
+reads as a caveat about present data. The fix is ALFRED vintages, worth doing
+when the macro agent becomes load-bearing.
+
+**Foreign filers report in two currencies.** 43 names in the 500 file the same
+fact in their home currency and in USD, and `companyfacts` presents both the
+same way. Every series is narrowed to one currency before anything is built
+from it, and `ratio` refuses to divide two known-different units outright —
+there is no FX series here to convert with, so dropping the ticker is the only
+honest answer. Before that guard existed, HDFC Bank's book-to-price read 18.05
+against a true 0.29, which would have ranked it the cheapest name in the
+universe at every rebalance, carrying a correct filing date and confidence 1.00.
 
 **yfinance is an unofficial scraper.** It breaks, rate limits, and silently
 returns short frames. Every ingest reports per-ticker coverage so a partial
@@ -348,3 +410,23 @@ tests/
   replayed and so each agent can be scored out-of-sample.
 - `Signal.cost_usd` travels with every signal: a paid agent has to earn its keep
   against the free ones.
+
+## What remains open
+
+**The top-20 result deserves one honest follow-up, not a strategy.** It is a
+small signal with four stated reasons to distrust it, and the one that can
+actually be removed is survivorship bias — the others are about effect size.
+Point-in-time universe membership is the test that would settle it, and it is
+a paid dataset. Running more configurations against the same biased universe
+would only raise what the Deflated Sharpe charges.
+
+**Step 6 stays unbuilt.** Scheduling a book that ties equal weight while paying
+4.3x the turnover is not a thing to automate.
+
+**Market cap is wrong for names that split between a filing and the asof.**
+The share count comes from the filing, the price from the tape, and nothing
+reconciles a split in between — a whole-number error. Fixing it needs split
+events ingested into the data layer.
+
+**The macro table is empty.** `FRED_API_KEY` was never set, so no agent reads
+macro and the CPI/UNRATE revision caveat is currently theoretical.

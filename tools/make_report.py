@@ -167,8 +167,8 @@ def _crop_to_drawing(png: pathlib.Path) -> pathlib.Path:
 def footer(canvas, doc, offset: int = 0):
     """Offset exists because the landscape page is a second document.
 
-    Built on its own it would number itself page 1; it is merged in as page
-    DIAGRAM_AFTER + 1, so it is told where it lands.
+    The report is three concatenated documents, each of which would number
+    itself from 1. Every piece is told how many pages precede it.
     """
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
@@ -179,20 +179,15 @@ def footer(canvas, doc, offset: int = 0):
     canvas.restoreState()
 
 
-DIAGRAM_AFTER = 2  # the landscape plate is merged in after this body page
+def build(part: str = "a", page_offset: int = 0) -> pathlib.Path:
+    """One half of the portrait body.
 
-
-def body_footer(canvas, doc):
-    # Body pages after the inserted plate shift forward by one.
-    footer(canvas, doc, offset=1 if doc.page > DIAGRAM_AFTER else 0)
-
-
-def diagram_footer(canvas, doc):
-    footer(canvas, doc, offset=DIAGRAM_AFTER)
-
-
-def build() -> pathlib.Path:
-    out = BUILD / "_body.pdf"
+    Part "a" is everything up to the price-factor verdict; part "b" is
+    everything after. The landscape plate is concatenated between them, so
+    no paragraph can be split across it — which is what happened when the
+    plate was spliced into a single continuous body at a fixed page number.
+    """
+    out = BUILD / f"_body_{part}.pdf"
     doc = SimpleDocTemplate(
         str(out), pagesize=A4,
         leftMargin=20 * mm, rightMargin=20 * mm,
@@ -216,16 +211,23 @@ def build() -> pathlib.Path:
     s += [
         Paragraph("The finding, before the detail", H2),
         Paragraph(
-            "The five factor agents have <b>no measurable cross-sectional edge</b> on US "
-            "large and mid caps over 2016&ndash;2024, and step 5 established that cheaper "
-            "execution cannot rescue them. The permutation test returns p = 0.295 while the "
-            "Deflated Sharpe passes at 99.4%: the return is real, it simply did not come "
-            "from selecting stocks. It is beta.",
+            "<b>No configuration beats equal weight on risk-adjusted terms.</b> The three "
+            "price factors have no cross-sectional edge at all over 2016&ndash;2024: the "
+            "permutation test returns p = 0.295 while the Deflated Sharpe passes at 99.4%, "
+            "so the return is real but did not come from selecting stocks. It is beta. "
+            "Step 5 established that cheaper execution cannot rescue it.",
+            BODY),
+        Paragraph(
+            "Value and Quality, tested separately once the lake held filings for the whole "
+            "universe, are different: the ranking does carry information. A 20-name book "
+            "passes the permutation test at p = 0.050. It still does not license trading, "
+            "because the entire gain is risk rather than skill &mdash; levering equal weight "
+            "to the same volatility returns +21.18% against the strategy&rsquo;s +21.44%.",
             BODY),
         Paragraph(
             "What the project did produce is a harness that catches this. It rejected its "
-            "own strategy three times, and nineteen defects found along the way were of the "
-            "silent kind &mdash; a plausible answer rather than an error.",
+            "own strategy four times, and twenty-four defects found along the way were of "
+            "the silent kind &mdash; a plausible answer rather than an error.",
             BODY),
     ]
 
@@ -241,7 +243,7 @@ def build() -> pathlib.Path:
          ["6", "Scheduling: cron to Alpaca paper", "not started"]],
         widths=[12 * mm, width - 42 * mm, 30 * mm])]
     s += [Paragraph(
-        "5,551 lines of code, 3,668 lines of tests, 305 tests passing with no network access.",
+        "5,728 lines of code, 3,921 lines of tests, 317 tests passing with no network access.",
         CAPTION)]
 
     s += [
@@ -298,7 +300,7 @@ def build() -> pathlib.Path:
     ]
 
     s += [
-        Paragraph("Validation: both runs reached the same verdict", H2),
+        Paragraph("Validation: every price-factor run reached the same verdict", H2),
         table([["Universe", "Observed", "Random mean", "p-value", "Deflated Sharpe", "Verdict"],
                ["30 names, top-25", "1.14", "1.16", "0.579", "99.6%", "FAIL"],
                ["474 names, top-50", "0.96", "0.93", "0.295", "99.4%", "FAIL"]],
@@ -309,6 +311,47 @@ def build() -> pathlib.Path:
             "tradeable names. Random portfolios of the same shape did as well. Read with the "
             "Deflated Sharpe, which passed: the return is real and it is not from selection.",
             CAPTION),
+    ]
+
+    if part == "a":
+        doc.build(
+            s,
+            onFirstPage=lambda c, d: footer(c, d, page_offset),
+            onLaterPages=lambda c, d: footer(c, d, page_offset),
+        )
+        return out
+
+    s = []
+    s += [
+        Paragraph("Value and Quality, once the filings existed", H2),
+        Paragraph(
+            "886k XBRL facts for 499 of 500 filers, so Value scores 326&ndash;383 names per "
+            "date and Quality 234&ndash;272, against 20 before. Same window, same costs.",
+            BODY),
+        table([["top-N held", "20", "50", "100", "400", "equal weight"],
+               ["Sharpe", "1.07", "1.04", "1.02", "0.97", "1.06"],
+               ["permutation p", "0.050", "0.055", "0.090", "0.697", "—"],
+               ["turnover/day", "0.69%", "0.58%", "0.49%", "0.39%", "0.16%"]],
+              widths=[34 * mm, 22 * mm, 22 * mm, 22 * mm, 22 * mm, width - 122 * mm]),
+        Paragraph(
+            "This sweep is not flat, and that is the finding. Sharpe falls and the p-value "
+            "rises monotonically as the book widens, no point out of order &mdash; four "
+            "points ordering themselves by chance is a 1-in-24 event. The top of the ranking "
+            "really is better than the bottom, which the price factors never showed.",
+            CAPTION),
+        Spacer(1, 7),
+        Paragraph(
+            "<b>It still does not license trading it.</b> The top-20 book is the first PASS "
+            "in this project, at p = 0.050 and a Deflated Sharpe of 99.8%. Four reasons that "
+            "is not enough: the whole gain is risk rather than skill &mdash; at 1.079x equal "
+            "weight&rsquo;s volatility, levering equal weight to match returns +21.18% "
+            "against +21.44%, leaving 0.26pp to selection and a Sharpe gap of 0.01 inside a "
+            "CI of [0.36, 1.81]; p = 0.050 is the boundary and four configurations were "
+            "tried, which clears 5% by luck alone 18.5% of the time; the permutation null is "
+            "random <i>20-name</i> books at Sharpe 0.89, not the 1.06 equal-weight book it "
+            "merely ties while paying 4.3x the turnover; and survivorship bias selects on "
+            "exactly the variable a value factor trades, because the cheap names still in "
+            "today&rsquo;s top 500 are the ones that recovered.", BODY),
     ]
 
     s += [
@@ -328,8 +371,13 @@ def build() -> pathlib.Path:
                 "factor and is not correctable from this data."],
                ["Revised macro series",
                 "Treasury yields and VIX are never revised and are point-in-time correct. "
-                "CPI and unemployment are revised, so the lake holds a cleaner series than "
-                "anyone had live."]],
+                "CPI and unemployment are, so a lake holding them holds a cleaner series "
+                "than anyone had live. None are ingested yet, and hf status names only the "
+                "series actually present."],
+               ["Dual-currency filers",
+                "43 of 500 file the same fact in their home currency and in USD. Each "
+                "series is narrowed to one currency, and a ratio across two known-different "
+                "units is refused outright: there is no FX series here to convert with."]],
               widths=[42 * mm, width - 42 * mm]),
     ]
 
@@ -338,34 +386,49 @@ def build() -> pathlib.Path:
         table(text_cols=(2,), rows=[["Found in", "Count", "Character"],
                ["Build (steps 1-5)", "8", "Mostly caught by tests within minutes of writing"],
                ["Code review", "15", "All fixed; three were silent and flattering"],
-               ["First contact with real EDGAR data", "5", "None were caught by 8 synthetic-payload tests"]],
+               ["First contact with real EDGAR data", "5", "None were caught by 8 synthetic-payload tests"],
+               ["Scaling that ingest to 500 filers", "6", "Four would have changed a reported number"]],
               widths=[52 * mm, 18 * mm, width - 70 * mm]),
         Paragraph(
-            "The last row is the one worth keeping: eight synthetic-payload tests all passed, "
-            "and the first real request exposed five defects &mdash; among them a "
-            "trailing-twelve-months sum reporting a 438.9% gross margin.", CAPTION),
+            "The bottom two rows are the ones worth keeping. Eight synthetic-payload tests "
+            "all passed, and the first real request exposed five defects. Scaling from 20 "
+            "filers to 500 exposed six more, none of which announced itself: a ratio built "
+            "across two currencies read a book-to-price of 18.05 against a true 0.29, and a "
+            "61-day smoke test pooled into the Deflated Sharpe raised the multiple-testing "
+            "hurdle twentyfold and failed a run that passes.", CAPTION),
     ]
 
     s += [
         Paragraph("What remains open", H2),
         Paragraph(
-            "<b>Value and Quality are not yet judged.</b> Both now produce signals from real "
-            "filings for 20 companies, but 20 names is too few to measure an edge. Testing "
-            "them properly means ingesting filings for the full 474-name universe.", BODY),
+            "<b>Only one of the four doubts about top-20 can be removed.</b> Three are about "
+            "effect size and will not move. The fourth, survivorship bias, is a measurement "
+            "problem with a known answer: point-in-time universe membership, which is a paid "
+            "dataset. Running more configurations against the same biased universe would "
+            "only raise what the Deflated Sharpe charges.", BODY),
         Paragraph(
-            "<b>Step 6 is deliberately not built.</b> Putting a strategy that loses to "
-            "buy-and-hold on a nightly schedule would be the wrong thing to automate.", BODY),
+            "<b>Step 6 is deliberately not built.</b> Scheduling a book that ties equal "
+            "weight while paying 4.3x the turnover is not a thing to automate.", BODY),
         Paragraph(
-            "<b>The trial log holds 18 entries.</b> Every further configuration tried raises "
-            "what the Deflated Sharpe charges, so the next test should answer a question "
-            "rather than search for a flattering number.", BODY),
+            "<b>Market cap is wrong for names that split between a filing and the asof.</b> "
+            "The share count comes from the filing and the price from the tape, with nothing "
+            "reconciling a split in between &mdash; a whole-number error. Fixing it needs "
+            "split events in the data layer.", BODY),
+        Paragraph(
+            "<b>The trial log holds 20 entries on this window.</b> Every further "
+            "configuration raises what the Deflated Sharpe charges, so the next test should "
+            "answer a question rather than search for a flattering number.", BODY),
     ]
 
-    doc.build(s, onFirstPage=body_footer, onLaterPages=body_footer)
+    doc.build(
+        s,
+        onFirstPage=lambda c, d: footer(c, d, page_offset),
+        onLaterPages=lambda c, d: footer(c, d, page_offset),
+    )
     return out
 
 
-def build_diagram_page() -> pathlib.Path | None:
+def build_diagram_page(page_offset: int = 0) -> pathlib.Path | None:
     """The diagram on its own landscape page.
 
     A 1.7:1 drawing squeezed into a portrait column renders its labels at
@@ -412,33 +475,51 @@ def build_diagram_page() -> pathlib.Path | None:
             drawing.drawHeight *= scale
         s += [Spacer(1, 2), drawing]
     s += [caption]
-    doc.build(s, onFirstPage=diagram_footer, onLaterPages=diagram_footer)
+    doc.build(
+        s,
+        onFirstPage=lambda c, d: footer(c, d, page_offset),
+        onLaterPages=lambda c, d: footer(c, d, page_offset),
+    )
     return out
 
 
 def assemble() -> pathlib.Path:
-    """Portrait report with the landscape diagram inserted after the findings."""
+    """Part A, the landscape plate, then part B — concatenated, not spliced.
+
+    Each piece is its own document, so page numbering is continuous only
+    because every piece is told the offset it lands at. That is the price of
+    not letting a paragraph straddle a landscape page.
+    """
     from pypdf import PdfReader, PdfWriter
 
-    body = build()
-    diagram_page = build_diagram_page()
-    if diagram_page is None:
-        return body
+    plate = build_diagram_page(page_offset=0)  # offset fixed up below
+
+    part_a = build("a", page_offset=0)
+    a_pages = PdfReader(part_a).pages
+    n_a = len(a_pages)
+
+    if plate is not None:
+        # Rebuild the plate now that its page number is known.
+        plate.unlink(missing_ok=True)
+        plate = build_diagram_page(page_offset=n_a)
+        plate_pages = PdfReader(plate).pages
+        if len(plate_pages) != 1:
+            raise RuntimeError(
+                f"The diagram plate came out as {len(plate_pages)} pages, not one. "
+                "Taking only the first would drop its caption without saying so; "
+                "shrink the image instead.")
+
+    offset_b = n_a + (1 if plate is not None else 0)
+    part_b = build("b", page_offset=offset_b)
 
     final = BUILD / "hedge-fund-phase0-report.pdf"
     writer = PdfWriter()
-    pages = PdfReader(body).pages
-    insert_after = min(DIAGRAM_AFTER, len(pages))
-    for i, page in enumerate(pages):
+    for page in a_pages:
         writer.add_page(page)
-        if i + 1 == insert_after:
-            plate = PdfReader(diagram_page).pages
-            if len(plate) != 1:
-                raise RuntimeError(
-                    f"The diagram plate came out as {len(plate)} pages, not one. "
-                    "Taking only the first would drop its caption without saying so; "
-                    "shrink the image instead.")
-            writer.add_page(plate[0])
+    if plate is not None:
+        writer.add_page(PdfReader(plate).pages[0])
+    for page in PdfReader(part_b).pages:
+        writer.add_page(page)
     writer.add_metadata({
         "/Title": "hedge_fund - Phase 0 report",
         "/Author": "Chaut007",
@@ -446,8 +527,9 @@ def assemble() -> pathlib.Path:
     })
     with final.open("wb") as fh:
         writer.write(fh)
-    diagram_page.unlink(missing_ok=True)
-    body.unlink(missing_ok=True)
+    for scratch in (part_a, part_b, plate):
+        if scratch is not None:
+            scratch.unlink(missing_ok=True)
     return final
 
 
