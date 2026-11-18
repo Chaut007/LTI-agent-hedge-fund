@@ -35,6 +35,7 @@ from hedge_fund.data.prices import IncompleteFetchError
 from hedge_fund.portfolio import (
     DIVERSIFIED,
     EQUAL,
+    FUNDAMENTAL_ONLY,
     MEDIUM_TERM,
     BandedOptimizer,
     RiskManager,
@@ -90,6 +91,9 @@ STRATEGIES: dict[str, Callable[[argparse.Namespace], Strategy]] = {
     "phase0_banded": lambda args: _phase0(dict(EQUAL), args, banded=True),
     # Step 5 complete: banded trading plus enforced hard limits.
     "phase0_risk": lambda args: _phase0(dict(EQUAL), args, banded=True, risk=True),
+    # Value and Quality alone, on filings for the full universe. The one
+    # Phase 0 hypothesis never actually tested.
+    "fundamental": lambda args: _phase0(dict(FUNDAMENTAL_ONLY), args),
 }
 
 EXIT_OK = 0

@@ -44,6 +44,15 @@ EQUAL: dict[str, float] = {
     "reversal": 1.0,
 }
 
+# The two agents that read filings rather than prices. Phase 0 measured the
+# price factors and found no cross-sectional edge; these were carried along in
+# that result without ever being tested on their own, because the lake held
+# filings for 20 names. This preset is what isolates them.
+FUNDAMENTAL_ONLY: dict[str, float] = {
+    "value": 1.0,
+    "quality": 1.0,
+}
+
 # Horizon-consistent: everything here speaks to months, not days. Reversal is
 # excluded rather than down-weighted, because the problem with it is its
 # horizon, not its size.

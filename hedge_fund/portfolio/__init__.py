@@ -2,6 +2,7 @@
 
 from hedge_fund.portfolio.aggregate import (
     EQUAL,
+    FUNDAMENTAL_ONLY,
     MEDIUM_TERM,
     AggregatedScore,
     WeightedAggregator,
@@ -25,6 +26,7 @@ __all__ = [
     "BOOTSTRAP_INFORMED",
     "DIVERSIFIED",
     "EQUAL",
+    "FUNDAMENTAL_ONLY",
     "MEDIUM_TERM",
     "AggregatedScore",
     "BandedOptimizer",
