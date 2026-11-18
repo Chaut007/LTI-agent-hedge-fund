@@ -30,7 +30,7 @@ from hedge_fund.backtest.costs import CostModel
 from hedge_fund.backtest.engine import WeightError
 from hedge_fund.config import ConfigError, load_settings
 from hedge_fund.data import edgar, macro, prices, universe
-from hedge_fund.data.lake import Lake
+from hedge_fund.data.lake import MACRO, Lake
 from hedge_fund.data.prices import IncompleteFetchError
 from hedge_fund.portfolio import (
     DIVERSIFIED,
@@ -207,15 +207,31 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return worst
 
 
+def _revisable_series_held(lake: Lake) -> list[str]:
+    """Which revisable FRED series are actually in the lake."""
+    if lake.row_count(MACRO) == 0:
+        return []
+    found = lake.unbounded_query(
+        "SELECT DISTINCT series_id FROM read_parquet(?)",
+        [str(lake.path(MACRO))],
+    )["series_id"].astype(str)
+    return sorted(set(found) & set(macro.REVISABLE))
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     lake = _lake()
     print(f"lake: {lake.dir}")
     print(lake.coverage().to_string(index=False))
     print(f"\nKNOWN BIASES\n  - {universe.SURVIVORSHIP_WARNING}")
-    print(
-        f"  - revised FRED series are not point-in-time: "
-        f"{', '.join(sorted(macro.REVISABLE))}"
-    )
+    # Only warn about series the lake actually holds. Reporting a caveat
+    # about revised CPI when there is no macro table tells the reader the
+    # data is present and merely imperfect, which is worse than silence —
+    # and this block is reprinted verbatim in the project report.
+    held = _revisable_series_held(lake)
+    if held:
+        print(
+            f"  - revised FRED series are not point-in-time: {', '.join(held)}"
+        )
     print(
         "  - adj_close is adjusted as of today; use close for price levels, "
         "adj_close for returns"

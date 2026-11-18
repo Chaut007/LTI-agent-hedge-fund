@@ -310,3 +310,35 @@ def test_unbounded_query_lives_only_on_the_lake(warm: Lake) -> None:
     )
     assert int(rows["n"].iloc[0]) == 5
     assert warm.view(date(2000, 1, 1)).prices(["AAPL"]).empty
+
+
+def test_status_omits_the_fred_caveat_when_the_lake_holds_no_macro(tmp_path) -> None:
+    """A caveat about data that is absent reads as a caveat about data present.
+
+    `hf status` printed "revised FRED series are not point-in-time:
+    CPIAUCSL, UNRATE" on a lake with an empty macro table, and that line is
+    reprinted verbatim in the project report — telling a reader the series
+    were there and merely imperfect.
+    """
+    from hedge_fund.cli import _revisable_series_held
+
+    assert _revisable_series_held(Lake(tmp_path / "empty")) == []
+
+
+def test_status_names_the_revisable_series_the_lake_does_hold(tmp_path) -> None:
+    from hedge_fund.cli import _revisable_series_held
+    from hedge_fund.data.lake import MACRO, MACRO_COLUMNS
+
+    lake = Lake(tmp_path / "lake")
+    lake.write(
+        MACRO,
+        pd.DataFrame(
+            [
+                {"series_id": "UNRATE", "date": date(2024, 1, 1), "value": 3.7},
+                {"series_id": "DGS10", "date": date(2024, 1, 1), "value": 4.0},
+            ],
+            columns=MACRO_COLUMNS,
+        ),
+    )
+    # DGS10 is never revised, so it is not a caveat.
+    assert _revisable_series_held(lake) == ["UNRATE"]
