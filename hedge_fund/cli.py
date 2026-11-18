@@ -338,7 +338,16 @@ def cmd_backtest(args: argparse.Namespace) -> int:
             sharpe_period=period_sharpe(result.net_returns.to_numpy()),
         )
     )
-    print(f"\n  trial recorded ({len(log)} distinct on file -> feeds the Deflated Sharpe)")
+    # Report the count that actually feeds the DSR, not the whole file. They
+    # differ whenever the log holds runs over other windows, and quoting the
+    # bigger number implies a multiple-testing charge that was not applied.
+    comparable = len(log.distinct(config.start, config.end))
+    total = len(log)
+    extra = f", {total} on file across all windows" if total != comparable else ""
+    print(
+        f"\n  trial recorded ({comparable} on this window -> feeds the "
+        f"Deflated Sharpe{extra})"
+    )
 
     if not args.validate:
         return EXIT_OK
